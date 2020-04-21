@@ -49,7 +49,22 @@ func (p *Debugger) Analyze() {
     p.Data = data
   }
 
+  r, _ := regexp.Compile(`[\d\w\s,.!?@#$%^&*()-_=+{}\[\];:'"<>~?/\\]+`)
+  s := r.FindAllString(string(p.Data), -1)
+
+  for i:=0; i<len(s); i++ {
+    if len(s[i]) > 3 {
+      p.Strings = append(p.Strings[:], s[i])
+    }
+  }
+
   p.Analyzed = true
+}
+
+func (p *Debugger) ShowStrings() {
+  for i:=0; i<len(p.Strings); i++ {
+    fmt.Println(p.Strings[i])
+  }
 }
 
 func (p *Debugger) DumpBytes(address, length uint64) {
@@ -81,7 +96,7 @@ func (p *Debugger) GetSymbolAddress(name string) (uint64, error) {
 func (p *Debugger) GetSectionAddress(name string) (uint64, error) {
   for _, section := range p.Sections {
     if section.Name == name {
-      return section.Addr, nil
+      return section.Offset, nil // Addr get address from memory, Offset get "address" from file
     }
   }
 
@@ -117,12 +132,13 @@ func (p *Debugger) Process() {
     "dump",
     "disassemble",
     "clear",
+    "strings",
     "quit"}
 
   for true {
     width, _ := termbox.Size()
 
-    fmt.Printf(fmt.Sprintf("\r0x%%016x >> %%-%ds", width - 22 - len(scanner) - 1), addr, scanner)
+    fmt.Printf(fmt.Sprintf("\r0x%%016x >> %%-%ds", width - 22 - len(scanner) - 1), addr, scanner + "_")
 
     ev := termbox.PollEvent()
 
@@ -207,6 +223,8 @@ func (p *Debugger) Process() {
         termbox.Sync()
       } else if words[0] == "analyze" {
         p.Analyze()
+      } else if words[0] == "strings" {
+        p.ShowStrings()
       } else if words[0] == "info" {
         infoPtr.ShowInformation()
       } else if words[0] == "dump" {

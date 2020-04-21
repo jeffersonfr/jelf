@@ -10,6 +10,7 @@ type State struct {
   Symbols []elf.Symbol
   Sections []*elf.Section
   Data []byte
+  Strings []string
   Analyzed bool
 }
 

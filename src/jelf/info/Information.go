@@ -4,6 +4,10 @@ import (
 	"fmt"
   "debug/elf"
   "encoding/hex"
+  "strings"
+  "regexp"
+  "strconv"
+  "errors"
 
   "jelf/state"
 
@@ -474,7 +478,7 @@ func (p *Information) ShowSymbols() {
   for _, symbol := range p.Symbols {
     if len(symbol.Name) > 0 {
       fmt.Printf(
-        "%24s [0x%08x, %d]\n",
+        "%32s [0x%08x, %d]\n",
         symbol.Name, symbol.Value, symbol.Size)
     }
   }
@@ -490,7 +494,7 @@ func (p *Information) ShowSections() {
   for _, section := range p.Sections {
     if len(section.Name) > 0 {
       fmt.Printf(
-        "%24s [addr:0x%08x off:0x%08x size:0x%08x]\n",
+        "%32s [addr:0x%08x off:0x%08x size:0x%08x]\n",
         section.Name, section.Addr, section.Offset, section.Size)
     }
   }
@@ -500,6 +504,67 @@ func (p *Information) ShowSections() {
   }
 }
 
+func (p *Information) GetAddressFromLea(addr uint64, code string) (uint64, error) {
+  r, _ := regexp.Compile(`lea .*, \[([-+]?.*)\]`)
+  s := r.FindAllSubmatch([]byte(code), -1)
+
+  if len(s) > 0 {
+    offsetStr := string(s[0][1])
+
+    offset, err := strconv.ParseInt(strings.Replace(offsetStr, "0x", "", -1), 16, 64)
+
+    if err == nil {
+      return uint64(int64(addr) + offset), nil
+    }
+  }
+
+  return 0, errors.New("Unable to retrive relative address")
+}
+
+func (p *Information) GetStringFromAddress(addr uint64) (string, error) {
+  r, _ := regexp.Compile(`[\d\w\s,.!?@#$%^&*()-_=+{}\[\];:'"<>~?/\\]+`)
+  s := r.FindAllString(string(p.Data[addr:]), -1)
+
+  if len(s) > 0 {
+    return "\"" + s[0] + "\"", nil
+  }
+
+  return "", errors.New("No string found")
+}
+
+func (p *Information) GetSymbolFromAddress(addr uint64) (string, error) {
+  for _, symbol := range p.Symbols {
+    if len(symbol.Name) > 0 {
+      if symbol.Value == addr {
+        return symbol.Name, nil
+      }
+    }
+  }
+
+  return "", errors.New("No symbol found")
+}
+
+func (p *Information) GetAddressContent(addr uint64, code string) string {
+  addr, err := p.GetAddressFromLea(addr, code)
+
+  if err != nil {
+    return ""
+  }
+
+  str, err := p.GetSymbolFromAddress(addr)
+
+  if err == nil {
+    return fmt.Sprintf("[0x%08x] %s", addr, str)
+  }
+
+  str, err = p.GetStringFromAddress(addr)
+
+  if err == nil {
+    return fmt.Sprintf("[0x%08x] %s", addr, str)
+  }
+
+  return ""
+}
 
 func (p *Information) ShowAssemble(addr uint64, lines int) error {
   if p.Analyzed == false {
@@ -523,7 +588,14 @@ func (p *Information) ShowAssemble(addr uint64, lines int) error {
       // return err
     }
 
-    fmt.Printf("0x%08x:  %24v\t%v\n", addr, ins, hex.EncodeToString(data[0:ins.Len]))
+    instruction := strings.ToLower(ins.String())
+    content := p.GetAddressContent(uint64(int(addr) + ins.Len), instruction)
+
+    if len(content) > 0 {
+      content = "; " + content
+    }
+
+    fmt.Printf("0x%08x:  %32v\t%-32v%s\n", addr, instruction, hex.EncodeToString(data[0:ins.Len]), content)
 
     data = data[ins.Len:]
 
