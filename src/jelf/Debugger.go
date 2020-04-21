@@ -41,6 +41,12 @@ func (p *Debugger) Analyze() {
     p.Symbols = symbols
   }
 
+  dynamicSymbols, err := p.File.DynamicSymbols()
+
+  if err == nil {
+    p.DynamicSymbols = dynamicSymbols
+  }
+
   p.Sections = p.File.Sections
 
   data, err := ioutil.ReadFile(p.Path)

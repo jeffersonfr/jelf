@@ -483,6 +483,14 @@ func (p *Information) ShowSymbols() {
     }
   }
 
+  for _, symbol := range p.DynamicSymbols {
+    if len(symbol.Name) > 0 {
+      fmt.Printf(
+        "%32s [0x%08x, %d]\n",
+        symbol.Name, symbol.Value, symbol.Size)
+    }
+  }
+
   if len(p.Symbols) == 0 {
     fmt.Println("no symbols found")
   }
@@ -502,23 +510,6 @@ func (p *Information) ShowSections() {
   if len(p.Sections) == 0 {
     fmt.Println("no sections found")
   }
-}
-
-func (p *Information) GetAddressFromLea(addr uint64, code string) (uint64, error) {
-  r, _ := regexp.Compile(`lea .*, \[([-+]?.*)\]`)
-  s := r.FindAllSubmatch([]byte(code), -1)
-
-  if len(s) > 0 {
-    offsetStr := string(s[0][1])
-
-    offset, err := strconv.ParseInt(strings.Replace(offsetStr, "0x", "", -1), 16, 64)
-
-    if err == nil {
-      return uint64(int64(addr) + offset), nil
-    }
-  }
-
-  return 0, errors.New("Unable to retrive relative address")
 }
 
 func (p *Information) GetStringFromAddress(addr uint64) (string, error) {
@@ -544,11 +535,49 @@ func (p *Information) GetSymbolFromAddress(addr uint64) (string, error) {
   return "", errors.New("No symbol found")
 }
 
+func (p *Information) GetAddressFromLea(addr uint64, code string) (uint64, error) {
+  r, _ := regexp.Compile(`lea .*, \[([-+]?.*)\]`)
+  s := r.FindAllSubmatch([]byte(code), -1)
+
+  if len(s) > 0 {
+    offsetStr := string(s[0][1])
+
+    offset, err := strconv.ParseInt(strings.Replace(offsetStr, "0x", "", -1), 16, 64)
+
+    if err == nil {
+      return uint64(int64(addr) + offset), nil
+    }
+  }
+
+  return 0, errors.New("Unable to retrive relative address")
+}
+
+func (p *Information) GetAddressFromCall(addr uint64, code string) (uint64, error) {
+  r, _ := regexp.Compile(`call \[([-+]?.*)\]`)
+  s := r.FindAllSubmatch([]byte(code), -1)
+
+  if len(s) > 0 {
+    offsetStr := string(s[0][1])
+
+    offset, err := strconv.ParseInt(strings.Replace(offsetStr, "0x", "", -1), 16, 64)
+
+    if err == nil {
+      return uint64(int64(addr) + offset), nil
+    }
+  }
+
+  return 0, errors.New("Unable to retrive relative address")
+}
+
 func (p *Information) GetAddressContent(addr uint64, code string) string {
   addr, err := p.GetAddressFromLea(addr, code)
 
   if err != nil {
-    return ""
+    addr, err = p.GetAddressFromCall(addr, code)
+
+    if err != nil {
+      return ""
+    }
   }
 
   str, err := p.GetSymbolFromAddress(addr)
@@ -563,7 +592,7 @@ func (p *Information) GetAddressContent(addr uint64, code string) string {
     return fmt.Sprintf("[0x%08x] %s", addr, str)
   }
 
-  return ""
+  return fmt.Sprintf("[0x%08x]", addr)
 }
 
 func (p *Information) ShowAssemble(addr uint64, lines int) error {
