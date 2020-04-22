@@ -7,9 +7,9 @@ import (
   "strings"
   "regexp"
   "strconv"
-  "errors"
 
   "jelf/state"
+  "jelf/err"
 
 	"golang.org/x/arch/x86/x86asm"
 )
@@ -520,7 +520,7 @@ func (p *Information) GetStringFromAddress(addr uint64) (string, error) {
     return "\"" + s[0] + "\"", nil
   }
 
-  return "", errors.New("No string found")
+  return "", err.NoStringFound
 }
 
 func (p *Information) GetSymbolFromAddress(addr uint64) (string, error) {
@@ -532,7 +532,7 @@ func (p *Information) GetSymbolFromAddress(addr uint64) (string, error) {
     }
   }
 
-  return "", errors.New("No symbol found")
+  return "", err.NoSymbolFound
 }
 
 func (p *Information) GetAddressFromLea(addr uint64, code string) (uint64, error) {
@@ -549,7 +549,7 @@ func (p *Information) GetAddressFromLea(addr uint64, code string) (uint64, error
     }
   }
 
-  return 0, errors.New("Unable to retrive relative address")
+  return 0, err.AddressNotFound
 }
 
 func (p *Information) GetAddressFromCall(addr uint64, code string) (uint64, error) {
@@ -566,33 +566,33 @@ func (p *Information) GetAddressFromCall(addr uint64, code string) (uint64, erro
     }
   }
 
-  return 0, errors.New("Unable to retrive relative address")
+  return 0, err.AddressNotFound
 }
 
 func (p *Information) GetAddressContent(addr uint64, code string) string {
-  addr, err := p.GetAddressFromLea(addr, code)
+  caddr, err := p.GetAddressFromLea(addr, code)
 
   if err != nil {
-    addr, err = p.GetAddressFromCall(addr, code)
+    caddr, err = p.GetAddressFromCall(addr, code)
 
     if err != nil {
       return ""
     }
   }
 
-  str, err := p.GetSymbolFromAddress(addr)
+  str, err := p.GetSymbolFromAddress(caddr)
 
   if err == nil {
-    return fmt.Sprintf("[0x%08x] %s", addr, str)
+    return fmt.Sprintf("[0x%08x] %s", caddr, str)
   }
 
-  str, err = p.GetStringFromAddress(addr)
+  str, err = p.GetStringFromAddress(caddr)
 
   if err == nil {
-    return fmt.Sprintf("[0x%08x] %s", addr, str)
+    return fmt.Sprintf("[0x%08x] %s", caddr, str)
   }
 
-  return fmt.Sprintf("[0x%08x]", addr)
+  return fmt.Sprintf("[0x%08x]", caddr)
 }
 
 func (p *Information) ShowAssemble(addr uint64, lines int) error {

@@ -5,15 +5,14 @@ import (
   "strconv"
   "strings"
   "io/ioutil"
-  "errors"
   "debug/elf"
   "regexp"
   "encoding/hex"
 
   "jelf/state"
   "jelf/info"
-
-	"github.com/nsf/termbox-go"
+  "jelf/term"
+  "jelf/err"
 )
 
 type Debugger struct {
@@ -86,6 +85,10 @@ func (p *Debugger) DumpBytes(address, length uint64) {
     return
   }
 
+  if (address + length) > (uint64)(len(p.Data)) {
+    length = (uint64)(len(p.Data)) - address
+  }
+
   fmt.Printf("%s", hex.Dump(p.Data[address:address + length]))
 }
 
@@ -96,7 +99,7 @@ func (p *Debugger) GetSymbolAddress(name string) (uint64, error) {
     }
   }
 
-  return 0, errors.New("Symbol not found")
+  return 0, err.SymbolNotFound
 }
 
 func (p *Debugger) GetSectionAddress(name string) (uint64, error) {
@@ -106,23 +109,24 @@ func (p *Debugger) GetSectionAddress(name string) (uint64, error) {
     }
   }
 
-  return 0, errors.New("Section not found")
+  return 0, err.SectionNotFound
+}
+
+type debugInfo struct {
+  Name string
+  Description string
 }
 
 func (p *Debugger) Process() {
   var scanner string
   var words []string
-  var addr uint64 = p.File.Entry
+  var addr uint64 = p.File.Entry // INFO:: consider the memory address
 
-  err := termbox.Init()
+  term := term.NewTerminal()
 
-  if err != nil {
-    panic(err)
-  }
+  defer term.Release()
 
-  defer termbox.Close()
-
-  var infoPtr info.IInformation = &info.Information {
+  info := &info.Information {
     &p.State}
 
   history := []string{
@@ -130,167 +134,139 @@ func (p *Debugger) Process() {
 
   historyIndex := 0
 
-  cmds := []string{
-    "analyze",
-    "symbols",
-    "sections",
-    "seek",
-    "dump",
-    "disassemble",
-    "clear",
-    "strings",
-    "quit"}
+  cmds := []debugInfo{
+    {"analyze", "process sections, symbols, ..."},
+    {"symbols", "shows symbols of binary"},
+    {"sections", "shows sections of binary"},
+    {"seek", "<memory/symbol/section>: seek to the refered pointer address"},
+    {"dump", "[number of bytes]: show the number of bytes starting at current address"},
+    {"disassemble", "[number of instructions]: disassemble the current address"},
+    {"clear", "clear screen"},
+    {"strings", "show all strings in binary"},
+    {"quit", "exit"}}
 
   for true {
-    width, _ := termbox.Size()
+    term.ClearLine()
 
-    fmt.Printf(fmt.Sprintf("\r0x%%016x >> %%-%ds", width - 22 - len(scanner) - 1), addr, scanner + "_")
+    fmt.Printf("0x%016x >> %s", addr, scanner)
 
-    ev := termbox.PollEvent()
+    b := term.Read()
 
-    if ev.Type != termbox.EventKey {
-      continue
-    }
+    if b == '\x1b' { // escape
+      b = term.Read()
 
-    if ev.Key == termbox.KeyArrowUp {
-      if historyIndex > 0 {
-        historyIndex = historyIndex - 1
-        scanner = history[historyIndex]
-      }
-    } else if ev.Key == termbox.KeyArrowDown {
-      if historyIndex < len(history) - 1 {
-        historyIndex = historyIndex + 1
-        scanner = history[historyIndex]
-      }
-    } else if ev.Key == termbox.KeyTab {
-      matches := []string{
-      }
+      if b == '\x5b' { // arrow keys
+        b = term.Read()
 
-      r, _ := regexp.Compile("^" + scanner)
-
-      for _, cmd := range cmds {
-        if len(r.FindString(cmd)) > 0 {
-          matches = append(matches[:], cmd)
+        if b == '\x41' { // up
+          if historyIndex > 0 {
+            historyIndex = historyIndex - 1
+            scanner = history[historyIndex]
+          }
+        } else if b == '\x42' { // down
+          if historyIndex < len(history) - 1 {
+            historyIndex = historyIndex + 1
+            scanner = history[historyIndex]
+          }
+        } else if b == '\x43' { // right
+        } else if b == '\x44' { // left
         }
       }
+    } else {
+      if b == '\t' { // tab
+        matches := []string{
+        }
 
-      if len(matches) == 1 {
-        scanner = matches[0]
-        historyIndex = len(history) - 1
-        history[historyIndex] = scanner
-      } else {
-        fmt.Printf("\n%v\n", matches)
-      }
-    } else if ev.Key == termbox.KeyBackspace || ev.Key == termbox.KeyBackspace2 {
-      if len(scanner) > 0 {
-        scanner = scanner[:len(scanner) - 1]
-      }
-    } else if ev.Key == termbox.KeyEnter {
-      words = strings.Fields(scanner)
+        r, _ := regexp.Compile("^" + scanner)
 
-      if len(scanner) == 0 {
-        continue
-      }
-
-      history = append(history[:], "")
-      historyIndex = len(history) - 1
-      scanner = ""
-
-      fmt.Printf("\n")
-
-      if len(words) == 0 {
-        continue
-      }
-
-      if words[0] == "help" {
-        fmt.Println(`
-.: jELF :: Binary Parser :.
-
-  analyze: analyze sections, symbols, ...
-
-  symbols: shows symbols of binary
-
-  sections: shows sections of binary
-
-  seek <memory/symbol/section>: seek to the refered pointer address
-
-  dump [number of bytes]: show the number of bytes starting at current address
-
-  disassemble [number of instructions]: disassemble the current address
-
-  clear: clear screen
-
-  quit: exit
-        `)
-      } else if words[0] == "quit" {
-        break
-      } else if words[0] == "clear" {
-        termbox.Clear(0x09, 0x00) // fg: white, bg: black
-        termbox.Sync()
-      } else if words[0] == "analyze" {
-        p.Analyze()
-      } else if words[0] == "strings" {
-        p.ShowStrings()
-      } else if words[0] == "info" {
-        infoPtr.ShowInformation()
-      } else if words[0] == "dump" {
-        var n uint64 = 32
-
-        if len(words) > 1 {
-          i, err := strconv.ParseUint(words[1], 10, 64)
-
-          if err == nil {
-            n = i
+        for _, cmd := range cmds {
+          if len(r.FindString(cmd.Name)) > 0 {
+            matches = append(matches[:], cmd.Name)
           }
         }
 
-        p.DumpBytes(addr, n)
-      } else if words[0] == "level" {
-        i, err := strconv.ParseUint(words[1], 10, 64)
-
-        if err != nil {
-          fmt.Println("Invalid command")
-
-          continue
-        }
-
-        if i == 1 {
-          infoPtr = &info.Information {
-            &p.State }
-        } else if i == 2 {
-          infoPtr = &info.AdvancedInformation {
-            &info.Information {
-              &p.State } }
+        if len(matches) == 1 {
+          scanner = matches[0]
+          historyIndex = len(history) - 1
+          history[historyIndex] = scanner
         } else {
-          fmt.Println("Invalid level")
+          fmt.Printf("\n%v\n", matches)
+        }
+      } else if b == '\x08' || b == '\x7f' { // backspace
+        if len(scanner) > 0 {
+          scanner = scanner[:len(scanner) - 1]
+        }
+      } else if b == '\n' { // enter
+        words = strings.Fields(scanner)
 
+        if len(scanner) == 0 {
           continue
         }
-      } else if words[0] == "symbols" {
-        infoPtr.ShowSymbols()
-      } else if words[0] == "sections" {
-        infoPtr.ShowSections()
-      } else if words[0] == "seek" {
-        if len(words) == 2 {
-          i, err := p.GetSymbolAddress(words[1])
 
-          if err != nil {
-            i, err := p.GetSectionAddress(words[1])
+        history = append(history[:], "")
+        historyIndex = len(history) - 1
+        scanner = ""
+
+        fmt.Printf("\n")
+
+        if len(words) == 0 {
+          continue
+        }
+
+        if words[0] == "help" {
+          for _, cmd := range cmds {
+            fmt.Println(cmd.Name, cmd.Description)
+          }
+        } else if words[0] == "quit" {
+          break
+        } else if words[0] == "clear" {
+          term.ClearScreen()
+        } else if words[0] == "analyze" {
+          p.Analyze()
+        } else if words[0] == "strings" {
+          p.ShowStrings()
+        } else if words[0] == "info" {
+          info.ShowInformation()
+        } else if words[0] == "dump" {
+          var n uint64 = 32
+
+          if len(words) > 1 {
+            i, err := strconv.ParseUint(words[1], 10, 64)
+
+            if err == nil {
+              n = i
+            }
+          }
+
+          p.DumpBytes(addr, n)
+        } else if words[0] == "symbols" {
+          info.ShowSymbols()
+        } else if words[0] == "sections" {
+          info.ShowSections()
+        } else if words[0] == "seek" {
+          if len(words) == 2 {
+            i, err := p.GetSymbolAddress(words[1])
 
             if err != nil {
-              i, err := strconv.ParseUint(words[1], 10, 64)
+              i, err := p.GetSectionAddress(words[1])
 
               if err != nil {
-                if strings.HasPrefix(words[1], "0x") {
-                  i, err := strconv.ParseUint(words[1][2:], 16, 64)
+                i, err := strconv.ParseUint(words[1], 10, 64)
 
-                  if err != nil {
-                    fmt.Println("address not found")
+                if err != nil {
+                  if strings.HasPrefix(words[1], "0x") {
+                    i, err := strconv.ParseUint(words[1][2:], 16, 64)
+
+                    if err != nil {
+                      fmt.Println("address not found")
+                    } else {
+                      addr = i
+                    }
                   } else {
-                    addr = i
+                    fmt.Println("address not found")
                   }
                 } else {
-                  fmt.Println("address not found")
+                  addr = i
                 }
               } else {
                 addr = i
@@ -298,48 +274,38 @@ func (p *Debugger) Process() {
             } else {
               addr = i
             }
-          } else {
-            addr = i
           }
-        }
 
-        // fmt.Printf("seek: 0x%08x\n", addr)
-      } else if words[0] == "disassemble" {
-        n := 32
+          // fmt.Printf("seek: 0x%08x\n", addr)
+        } else if words[0] == "disassemble" {
+          n := 32
 
-        if len(words) > 1 {
-          i, err := strconv.Atoi(words[1])
+          if len(words) > 1 {
+            i, err := strconv.Atoi(words[1])
+
+            if err == nil {
+              n = i
+            }
+
+            if n < 0 {
+              n = i
+            }
+          }
+
+          err := info.ShowAssemble(addr, n)
 
           if err != nil {
-            n = i
+            fmt.Println("Invalid operators")
           }
-
-          if n < 0 {
-            n = i
-          }
-        }
-
-        err := infoPtr.ShowAssemble(addr, n)
-
-        if err != nil {
-          fmt.Println("Invalid operators")
+        } else {
+          fmt.Println("command not found")
         }
       } else {
-        fmt.Println("command not found")
-      }
-    } else {
-      var ch rune = 0
+        if b >= 0x20 && b < 0x7f {
+          scanner = scanner + string(b)
 
-      if ev.Ch != 0 {
-        ch = ev.Ch
-      } else {
-        ch = (rune)(ev.Key)
-      }
-
-      if ch >= 0x20 && ch < 0x7f {
-        scanner = scanner + string(ch)
-
-        history[len(history) - 1] = scanner
+          history[len(history) - 1] = scanner
+        }
       }
     }
   }
