@@ -1,4 +1,4 @@
-package jelf
+package core
 
 import (
   "fmt"
@@ -8,11 +8,12 @@ import (
   "debug/elf"
   "regexp"
   "encoding/hex"
+  "os"
 
-  "jelf/state"
-  "jelf/info"
-  "jelf/term"
-  "jelf/err"
+  "jelf/core/state"
+  "jelf/core/info"
+  "jelf/core/term"
+  "jelf/core/err"
 )
 
 type Debugger struct {
@@ -58,7 +59,7 @@ func (p *Debugger) Analyze() {
   s := r.FindAllString(string(p.Data), -1)
 
   for i:=0; i<len(s); i++ {
-    if len(s[i]) > 3 {
+    if len(s[i]) >= 3 {
       p.Strings = append(p.Strings[:], s[i])
     }
   }
@@ -70,6 +71,16 @@ func (p *Debugger) ShowStrings() {
   for i:=0; i<len(p.Strings); i++ {
     fmt.Println(p.Strings[i])
   }
+}
+
+func (p *Debugger) RunProcess(args []string) {
+  process, err := os.StartProcess(p.Path, args, nil)
+	if err != nil {
+		fmt.Println(err)
+	}
+  fmt.Println("Running: [", p.Path, "], Pid: [", process.Pid, "]")
+
+  p.Running = true
 }
 
 func (p *Debugger) DumpBytes(address, length uint64) {
@@ -143,6 +154,7 @@ func (p *Debugger) Process() {
     {"disassemble", "[number of instructions]: disassemble the current address"},
     {"clear", "clear screen"},
     {"strings", "show all strings in binary"},
+    {"run", "starts the execution of process"},
     {"quit", "exit"}}
 
   for true {
@@ -225,6 +237,8 @@ func (p *Debugger) Process() {
           p.Analyze()
         } else if words[0] == "strings" {
           p.ShowStrings()
+        } else if words[0] == "run" {
+          p.RunProcess([]string{""})
         } else if words[0] == "info" {
           info.ShowInformation()
         } else if words[0] == "dump" {

@@ -13,5 +13,6 @@ type State struct {
   Data []byte
   Strings []string
   Analyzed bool
+  Running bool
 }
 

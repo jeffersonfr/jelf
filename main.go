@@ -4,7 +4,8 @@ import (
   "fmt"
   "os"
   "log"
-  "jelf"
+
+  jelf "jelf/core"
 )
 
 func main() {

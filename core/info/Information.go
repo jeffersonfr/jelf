@@ -8,8 +8,8 @@ import (
   "regexp"
   "strconv"
 
-  "jelf/state"
-  "jelf/err"
+  "jelf/core/state"
+  "jelf/core/err"
 
 	"golang.org/x/arch/x86/x86asm"
 )
@@ -491,7 +491,7 @@ func (p *Information) ShowSymbols() {
     }
   }
 
-  if len(p.Symbols) == 0 {
+  if len(p.Symbols) == 0 && len(p.DynamicSymbols) == 0 {
     fmt.Println("no symbols found")
   }
 }
@@ -513,6 +513,10 @@ func (p *Information) ShowSections() {
 }
 
 func (p *Information) GetStringFromAddress(addr uint64) (string, error) {
+  if addr >= uint64(len(p.Data)) {
+    return "", err.NoStringFound // CHANGE:: out of range
+  }
+
   r, _ := regexp.Compile(`[\d\w\s,.!?@#$%^&*()-_=+{}\[\];:'"<>~?/\\]+`)
   s := r.FindAllString(string(p.Data[addr:]), -1)
 
