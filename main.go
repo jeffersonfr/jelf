@@ -15,12 +15,12 @@ func main() {
     return
   }
 
-  debugger, err := jelf.NewDebugger(os.Args[1])
+  analyzer, err := jelf.NewAnalyzer(os.Args[1])
 
   if err != nil {
     log.Fatal(err)
   }
 
-  debugger.Process()
+  analyzer.Process()
 }
 

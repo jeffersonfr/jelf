@@ -12,15 +12,15 @@ import (
 
   "jelf/core/state"
   "jelf/core/info"
-  "jelf/core/term"
+  "jelf/core/misc"
   "jelf/core/err"
 )
 
-type Debugger struct {
+type Analyzer struct {
   state.State
 }
 
-func NewDebugger(path string) (*Debugger, error) {
+func NewAnalyzer(path string) (*Analyzer, error) {
   file, err := elf.Open(path)
 
   if err != nil {
@@ -30,11 +30,11 @@ func NewDebugger(path string) (*Debugger, error) {
   state := state.State {
     Path: path, File: file}
 
-  return &Debugger{
+  return &Analyzer{
     state}, nil
 }
 
-func (p *Debugger) Analyze() {
+func (p *Analyzer) Analyze() {
   symbols, err := p.File.Symbols()
 
   if err == nil {
@@ -67,13 +67,13 @@ func (p *Debugger) Analyze() {
   p.Analyzed = true
 }
 
-func (p *Debugger) ShowStrings() {
+func (p *Analyzer) ShowStrings() {
   for i:=0; i<len(p.Strings); i++ {
     fmt.Println(p.Strings[i])
   }
 }
 
-func (p *Debugger) RunProcess(args []string) {
+func (p *Analyzer) RunProcess(args []string) {
   process, err := os.StartProcess(p.Path, args, nil)
 	if err != nil {
 		fmt.Println(err)
@@ -83,7 +83,7 @@ func (p *Debugger) RunProcess(args []string) {
   p.Running = true
 }
 
-func (p *Debugger) DumpBytes(address, length uint64) {
+func (p *Analyzer) DumpBytes(address, length uint64) {
   if p.Analyzed == false {
     fmt.Println("Call 'analyze' before")
 
@@ -103,7 +103,7 @@ func (p *Debugger) DumpBytes(address, length uint64) {
   fmt.Printf("%s", hex.Dump(p.Data[address:address + length]))
 }
 
-func (p *Debugger) GetSymbolAddress(name string) (uint64, error) {
+func (p *Analyzer) GetSymbolAddress(name string) (uint64, error) {
   for _, symbol := range p.Symbols {
     if symbol.Name == name {
       return symbol.Value, nil
@@ -113,7 +113,7 @@ func (p *Debugger) GetSymbolAddress(name string) (uint64, error) {
   return 0, err.SymbolNotFound
 }
 
-func (p *Debugger) GetSectionAddress(name string) (uint64, error) {
+func (p *Analyzer) GetSectionAddress(name string) (uint64, error) {
   for _, section := range p.Sections {
     if section.Name == name {
       return section.Offset, nil // Addr get address from memory, Offset get "address" from file
@@ -128,12 +128,12 @@ type debugInfo struct {
   Description string
 }
 
-func (p *Debugger) Process() {
+func (p *Analyzer) Process() {
   var scanner string
   var words []string
   var addr uint64 = p.File.Entry // INFO:: consider the memory address
 
-  term := term.NewTerminal()
+  term := misc.NewTerminal()
 
   defer term.Release()
 
@@ -146,16 +146,19 @@ func (p *Debugger) Process() {
   historyIndex := 0
 
   cmds := []debugInfo{
-    {"analyze", "process sections, symbols, ..."},
-    {"symbols", "shows symbols of binary"},
-    {"sections", "shows sections of binary"},
-    {"seek", "<memory/symbol/section>: seek to the refered pointer address"},
-    {"dump", "[number of bytes]: show the number of bytes starting at current address"},
-    {"disassemble", "[number of instructions]: disassemble the current address"},
-    {"clear", "clear screen"},
-    {"strings", "show all strings in binary"},
-    {"run", "starts the execution of process"},
-    {"quit", "exit"}}
+    {"analyze", ": process sections, symbols, ..."},
+    {"symbols", ": shows symbols of binary"},
+    {"sections", ": shows sections of binary"},
+    {"seek", "<memory/symbol/section> : seek to the refered pointer address"},
+    {"dump", "[number of bytes] : show the number of bytes starting at current address"},
+    {"disassemble", "[number of instructions] : disassemble the current address"},
+    {"clear", ": clear screen"},
+    {"strings", ": show all strings in binary"},
+    {"run", ": starts the execution of process"},
+    {"quit", ": exit"}}
+
+  expr := []string{
+    "=[box] <expression> : evaluate arithmetic expression (b: binary, o: octal, h: hexadecimal)"}
 
   for true {
     term.ClearLine()
@@ -226,8 +229,16 @@ func (p *Debugger) Process() {
         }
 
         if words[0] == "help" {
+          fmt.Println(":commands:")
+
           for _, cmd := range cmds {
-            fmt.Println(cmd.Name, cmd.Description)
+            fmt.Println("  ", cmd.Name, cmd.Description)
+          }
+
+          fmt.Println(":expressions:")
+
+          for _, cmd := range expr {
+            fmt.Println("  ", cmd)
           }
         } else if words[0] == "quit" {
           break
@@ -310,6 +321,23 @@ func (p *Debugger) Process() {
 
           if err != nil {
             fmt.Println("Invalid operators")
+          }
+        } else if strings.HasPrefix(words[0], "=") {
+          cmd := strings.ToLower(words[0])
+          expr := strings.Join(words[1:], "")
+
+          if r, err := misc.ParseAndEval(expr); err == nil {
+            if strings.HasPrefix(cmd, "=x") {
+              fmt.Printf("0x%s\n", strconv.FormatUint(uint64(r), 16))
+            } else if strings.HasPrefix(cmd, "=o") {
+              fmt.Printf("0%s\n", strconv.FormatUint(uint64(r), 8))
+            } else if strings.HasPrefix(cmd, "=b") {
+              fmt.Printf("0b%s\n", strconv.FormatUint(uint64(r), 2))
+            } else {
+              fmt.Println(r)
+            }
+          } else {
+            fmt.Println("invalid expression: ", err)
           }
         } else {
           fmt.Println("command not found")
