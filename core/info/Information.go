@@ -573,6 +573,40 @@ func (p *Information) GetAddressFromCall(addr uint64, code string) (uint64, erro
   return 0, err.AddressNotFound
 }
 
+func (p *Information) GetAddressFromCallOffset(addr uint64, code string) (uint64, error) {
+  r, _ := regexp.Compile(`call \.([-+]?.*)`)
+  s := r.FindAllSubmatch([]byte(code), -1)
+
+  if len(s) > 0 {
+    offsetStr := string(s[0][1])
+
+    offset, err := strconv.ParseInt(strings.Replace(offsetStr, "0x", "", -1), 16, 64)
+
+    if err == nil {
+      return uint64(int64(addr) + offset), nil
+    }
+  }
+
+  return 0, err.AddressNotFound
+}
+
+func (p *Information) GetAddressFromJump(addr uint64, code string) (uint64, error) {
+  r, _ := regexp.Compile(`(je|jne|jl|jle|jg|jge|jmp) \.([-+]?.*)`)
+  s := r.FindAllSubmatch([]byte(code), -1)
+
+  if len(s) > 0 {
+    offsetStr := string(s[0][2])
+
+    offset, err := strconv.ParseInt(strings.Replace(offsetStr, "0x", "", -1), 16, 64)
+
+    if err == nil {
+      return uint64(int64(addr) + offset), nil
+    }
+  }
+
+  return 0, err.AddressNotFound
+}
+
 func (p *Information) GetAddressContent(addr uint64, code string) string {
   caddr, err := p.GetAddressFromLea(addr, code)
 
@@ -580,7 +614,15 @@ func (p *Information) GetAddressContent(addr uint64, code string) string {
     caddr, err = p.GetAddressFromCall(addr, code)
 
     if err != nil {
-      return ""
+      caddr, err = p.GetAddressFromCallOffset(addr, code)
+
+      if err != nil {
+        caddr, err = p.GetAddressFromJump(addr, code)
+
+        if err != nil {
+          return ""
+        }
+      }
     }
   }
 

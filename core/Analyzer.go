@@ -9,6 +9,9 @@ import (
   "regexp"
   "encoding/hex"
   "os"
+  "os/exec"
+  "syscall"
+  "bytes"
 
   "jelf/core/state"
   "jelf/core/info"
@@ -65,20 +68,77 @@ func (p *Analyzer) Analyze() {
   }
 
   p.Analyzed = true
+
+
+
+  // process dyn func names
+  for _, section := range p.Sections {
+    if section.Name == ".dynstr" {
+      data, _ := section.Data()
+      texts := bytes.Split(data, []byte{0x00})
+
+      for n, text := range texts {
+        fmt.Println(n, ":", string(text))
+      }
+    }
+  }
+
+  for _, section := range p.Sections {
+    if section.Name == ".rela.dyn" {
+      data, _ := section.Data()
+
+      fmt.Println(len(data))
+      for i:=0; i<len(data); i+=24 {
+        fmt.Printf("%d : %s", i/24, hex.Dump(data[i:i+24]))
+      }
+    }
+  }
 }
 
 func (p *Analyzer) ShowStrings() {
+  if p.Analyzed == false {
+    fmt.Println("Call 'analyze' before")
+
+    return
+  }
+
   for i:=0; i<len(p.Strings); i++ {
     fmt.Println(p.Strings[i])
   }
 }
 
 func (p *Analyzer) RunProcess(args []string) {
+  cmd := exec.Command(p.Path, args...)
+
+  cmd.Stdin = os.Stdin
+  cmd.Stdout = os.Stdout
+  cmd.Stderr = os.Stderr
+
+  cmd.SysProcAttr = &syscall.SysProcAttr{
+    Ptrace: true}
+
+  cmd.Start()
+  cmd.Wait()
+
+  fmt.Println(cmd.Process.Pid)
+
+  var regs syscall.PtraceRegs
+
+  syscall.PtraceGetRegs(cmd.Process.Pid, &regs)
+
+  fmt.Printf("RBP: %x\n", regs.Rbp);
+
+  // Peek/Poke
+
+  /*
   process, err := os.StartProcess(p.Path, args, nil)
-	if err != nil {
+
+  if err != nil {
 		fmt.Println(err)
 	}
+
   fmt.Println("Running: [", p.Path, "], Pid: [", process.Pid, "]")
+  */
 
   p.Running = true
 }
@@ -227,6 +287,8 @@ func (p *Analyzer) Process() {
         if len(words) == 0 {
           continue
         }
+
+        words[0] = strings.Trim(words[0], " \t")
 
         if words[0] == "help" {
           fmt.Println(":commands:")
